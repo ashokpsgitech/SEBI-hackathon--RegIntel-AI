@@ -1,0 +1,91 @@
+================================================================================
+VANGUARD INDIA ASSET MANAGEMENT COMPANY LIMITED
+Standard Operating Procedure (SOP) Manual: Compliance & Operations Ledger
+================================================================================
+Document Reference: VI-AMC-SOP-2026-V3.4
+Effective Date: March 15, 2026
+Owner: Department of Legal, Audit, and Regulatory Compliance
+Approved By: Board of Directors (Resolution Ref: BOD-2026-R02)
+Security Classification: Restricted - Internal Compliance Review Only
+
+--------------------------------------------------------------------------------
+TABLE OF CONTENTS
+--------------------------------------------------------------------------------
+1. DOCUMENT CONTROL & REVISION LOG
+2. SECTION 1: CORPORATE GOVERNANCE & BOARD ADMINISTRATION
+3. SECTION 2: STEWARDSHIP CODE & FIDUCIARY RESPONSIBILITIES
+4. SECTION 3: CLIENT ONBOARDING, AML & KYC PROTOCOLS
+5. SECTION 4: CUSTOMER GRIEVANCE REDRESSAL & SCORES INTEGRATION
+6. SECTION 5: RISK MANAGEMENT & OPERATIONAL CONTROLS
+7. SECTION 6: KEY COMPLIANCE PERSONNEL & DIRECTORY DISPLAYS
+
+--------------------------------------------------------------------------------
+1. DOCUMENT CONTROL & REVISION LOG
+--------------------------------------------------------------------------------
+*   Version 1.0 (Jan 2020): Initial draft under Stewardship guidelines.
+*   Version 2.0 (Mar 2023): Integrated SEBI AIF Master Circular revisions.
+*   Version 3.0 (Jan 2025): Added cyber security controls and transaction limits.
+*   Version 3.4 (Current - Mar 2026): Updated internal legal custody rules and grievance escalation pathways.
+
+--------------------------------------------------------------------------------
+2. SECTION 1: CORPORATE GOVERNANCE & BOARD ADMINISTRATION
+--------------------------------------------------------------------------------
+2.1. Board of Directors Meetings:
+The Board of Directors of Vanguard India Asset Management Company Limited (VI-AMC) shall meet semi-annually (twice every financial year, with a maximum gap of 180 days between consecutive sessions) to review general corporate administration, capital allocations, portfolio assets performance, and organizational risk.
+2.2. Minutes and Records Custody:
+Detailed minutes of all Board meetings, along with resolutions, agendas, and presentation decks, must be compiled by the Company Secretary. These records must be maintained in physical custody at the registered corporate office in Mumbai for a statutory period of not less than eight (8) years.
+2.3. Audit Committee Review:
+The Audit Committee of the board shall meet at least three times a year to review internal audit reports, transaction ledgers, and operational balance sheets.
+
+--------------------------------------------------------------------------------
+3. SECTION 2: STEWARDSHIP CODE & FIDUCIARY RESPONSIBILITIES
+--------------------------------------------------------------------------------
+3.1. Stewardship Policy Statement:
+VI-AMC acts as a fiduciary for its unitholders and clients. The Investment Stewardship Committee (ISC) is responsible for oversight of investee companies to protect client wealth.
+3.2. Conflict of Interest Mitigation:
+A dedicated "Conflict of Interest Register" shall be maintained digitally. If any investment manager holds a personal interest, family relation, or board position in a listed investee company, they must immediately declare the conflict and abstain from any investment or voting decisions regarding that specific entity.
+3.3. Voting Guidelines and Recordkeeping:
+All proxy voting decisions on resolutions of listed investee companies must be taken in accordance with the Board-approved Voting Policy. Voting records (voted For, Against, or Abstained) along with the specific rationale for each vote must be logged internally by the Legal department.
+3.4. Policy Updates and Disclosure Limits:
+Internal stewardship policies and operational voting guidelines are updated once every three years to reflect general market practices and internal process changes. Currently, stewardship guidelines are kept internally by the Legal and Board Operations teams. There is no active requirement in this policy for annual public website disclosures of voting/stewardship activities.
+
+--------------------------------------------------------------------------------
+4. SECTION 3: CLIENT ONBOARDING, AML & KYC PROTOCOLS
+--------------------------------------------------------------------------------
+4.1. Prevention of Money Laundering (PML) Procedures:
+All customer onboarding processes must adhere to the Prevention of Money Laundering Act (PMLA). Principal Officers must conduct enhanced due diligence (EDD) for high-value accounts, non-resident clients, and corporate accounts.
+4.2. KYC Registry and Document Verification:
+All onboarding clients must complete standard KYC verification. Customer KYC forms, along with official government identification documents (PAN, Aadhaar, Passport), must be scanned and uploaded to the centralized KRA (KYC Registration Agency) systems within three (3) working days of receiving the client application.
+4.3. Politically Exposed Persons (PEP) Reviews:
+Clients categorized as Politically Exposed Persons (PEP) must seek prior approval from the Head of Compliance before their account can be activated and assets deployed in any mutual fund or AIF scheme.
+
+--------------------------------------------------------------------------------
+5. SECTION 4: CUSTOMER GRIEVANCE REDRESSAL & SCORES INTEGRATION
+--------------------------------------------------------------------------------
+5.1. Customer Complaint Logging:
+Customer complaints and grievances received via official email (complaints@vanguard-amc.in), web forms, or physical post channels are consolidated daily by the Customer Service department.
+5.2. Timelines and Resolution Pathways:
+All customer grievances must be registered in the internal complaint ledger. The customer support team must resolve every complaint and send a final resolution intimation to the investor within thirty (30) days of receiving the grievance.
+5.3. SEBI Complaints Redress System (SCORES):
+The Compliance Team must access the official SEBI SCORES portal daily. Any complaint routed through SCORES must be responded to, with action taken reports (ATR) uploaded on the portal, within twenty-one (21) days of the complaint receipt.
+5.4. Annual Reporting:
+An annual grievance redressal report, summarizing the number of complaints received, resolved, and pending, must be compiled and submitted to SEBI by the Compliance Officer. This report must be sent within ninety (90) days from the close of the financial year.
+
+--------------------------------------------------------------------------------
+6. SECTION 5: RISK MANAGEMENT & OPERATIONAL CONTROLS
+--------------------------------------------------------------------------------
+6.1. Portfolio Concentration Limits:
+Fund managers must ensure that exposure to any single equity stock does not exceed ten percent (10%) of the Net Asset Value (NAV) of the mutual fund scheme, or fifteen percent (15%) of the investable funds of an Alternative Investment Fund (AIF) scheme.
+6.2. Cyber Security & Transaction Auditing:
+The IT Infrastructure department shall run batch jobs at midnight to process client transactions, settle NAV allocations, and back up system database records. The backup records must be encrypted using AES-256 and stored on off-site cloud servers.
+6.3. System Access Control:
+Access to trading desks, deal logs, and client portfolios is restricted based on role privilege levels. The IT security team must audit logs weekly to detect any unauthorized access.
+
+--------------------------------------------------------------------------------
+7. SECTION 6: KEY COMPLIANCE PERSONNEL & DIRECTORY DISPLAYS
+--------------------------------------------------------------------------------
+7.1. Appointment of Key Personnel:
+Mr. Rajesh Sharma is appointed as the Compliance Officer and Principal Officer for Vanguard India Asset Management Company Limited. He is responsible for managing relationships with SEBI, coordinating annual audits, and submitting statutory reports.
+7.2. Office Contact Information Displays:
+All corporate branches and regional offices of VI-AMC shall display physical name boards, brokerage registration certificates, and compliance registers in the lobby. Contact numbers, email addresses, and postal addresses of the Compliance Officer must be displayed prominently near the reception desk for investor grievance reference.
+================================================================================

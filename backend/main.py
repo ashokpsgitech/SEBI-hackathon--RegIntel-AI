@@ -162,24 +162,81 @@ def process_circular_for_company(company_id: int, circular_id: int):
     if not circular:
         raise HTTPException(status_code=404, detail="Circular not found")
         
+    trace = []
+    def log_trace(agent_name, msg):
+        trace.append({
+            "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3],
+            "agent": agent_name,
+            "message": msg
+        })
+        
+    log_trace("MonitoringAgent", f"Initiated compliance analysis for circular {circular['circular_number']}: '{circular['title']}'.")
+    
     obligations = db.get_obligations_by_circular(circular_id)
+    log_trace("ObligationExtractorAgent", f"Scanned circular text database. Loaded {len(obligations)} obligation records.")
     
     # 1. Filter applicable obligations
     applicable = agent.filter_applicable_obligations(obligations, company['entity_type'])
+    log_trace("ApplicabilityAgent", f"Classified entity applicability for {company['entity_type'].upper()}. Filtered out {len(obligations) - len(applicable)} irrelevant clause(s). {len(applicable)} applicable obligation(s) remaining.")
+    
     if not applicable:
         db.add_audit_log(company_id, "parse_circular", f"Circular {circular['circular_number']} analyzed: Not applicable to entity type.", "System Agent")
-        return {"status": "skipped", "message": f"No obligations applicable to {company['entity_type']}"}
+        log_trace("ApplicabilityAgent", f"Execution terminated: No obligations apply to {company['entity_type'].upper()}.")
+        return {"status": "skipped", "message": f"No obligations applicable to {company['entity_type']}", "trace": trace}
         
     # 2. Retrieve SOP chunks
     sop_chunks = db.get_document_chunks_by_company(company_id)
+    log_trace("SopDiffAgent", f"Loaded {len(sop_chunks)} vector-indexed SOP clauses for semantic analysis.")
     
     tasks_created = 0
     # For each applicable obligation, run Diff Agent
-    for ob in applicable:
+    for idx, ob in enumerate(applicable):
+        log_trace("SopDiffAgent", f"Processing Obligation {idx+1}/{len(applicable)}: '{ob['obligation_text'][:60]}...'")
+        
+        # Smart Caching Check (Innovation 1)
+        cached_task = None
+        existing_tasks = db.get_tasks_by_company(company_id)
+        ob_emb = agent.get_embedding(ob['obligation_text'])
+        
+        # If we have existing tasks, check similarity
+        best_sim = 0.0
+        for ext in existing_tasks:
+            if ext.get('obligation_text'):
+                ext_emb = agent.get_embedding(ext['obligation_text'])
+                sim = agent.cosine_similarity(ob_emb, ext_emb)
+                if sim > best_sim:
+                    best_sim = sim
+                if sim > 0.93:
+                    cached_task = ext
+                    break
+                    
+        if cached_task:
+            log_trace("SmartCachingAgent", f"Cache HIT! Found highly similar obligation (Sim: {best_sim:.2f}) from task #{cached_task['id']} (Circular {cached_task['circular_number']}). Reusing audit history and redlining updates.")
+            
+            circ_date_val = datetime.strptime(circular['date'], "%Y-%m-%d")
+            deadline_days = ob.get('deadline_days') or 30
+            deadline_date_val = circ_date_val + timedelta(days=int(deadline_days))
+            deadline_date_str = deadline_date_val.strftime("%Y-%m-%d")
+            
+            task_id = db.create_task(
+                company_id,
+                ob['id'],
+                f"Address SEBI Gap: {ob['section_reference'] or 'Circular Section'} (Cached Ref)",
+                f"{ob['obligation_text']}\n\n**Note: Evaluation cached from previous circular.**\n\n{cached_task['description']}",
+                cached_task['department_owner'],
+                deadline_date_str
+            )
+            
+            if cached_task.get('validation_feedback'):
+                db.update_task_validation(task_id, cached_task['validation_status'], cached_task['validation_feedback'])
+                
+            tasks_created += 1
+            db.add_audit_log(company_id, "task_created", f"Created compliance task for {circular['circular_number']} (from cache): {ob['section_reference']}", "System Agent")
+            continue
+            
         # Find relevant chunks using cosine similarity
         relevant_chunks = []
         if sop_chunks:
-            ob_emb = agent.get_embedding(ob['obligation_text'])
             chunk_sims = []
             for chunk in sop_chunks:
                 chunk_emb = json.loads(chunk['embedding']) if chunk.get('embedding') else None
@@ -187,24 +244,31 @@ def process_circular_for_company(company_id: int, circular_id: int):
                     sim = agent.cosine_similarity(ob_emb, chunk_emb)
                     chunk_sims.append((sim, chunk))
             
-            # Sort by similarity desc
             chunk_sims.sort(key=lambda x: x[0], reverse=True)
-            # Take top 3
-            relevant_chunks = [item[1] for item in chunk_sims[:3]]
-            
+            if chunk_sims:
+                relevant_chunks = [item[1] for item in chunk_sims[:3]]
+                log_trace("SopDiffAgent", f"Calculated vector similarity. Retrieved top {len(relevant_chunks)} matching SOP chunks. Top score: {chunk_sims[0][0]:.2f}.")
+            else:
+                log_trace("SopDiffAgent", f"No vector matching SOP chunks found for comparison.")
+        else:
+            log_trace("SopDiffAgent", "No company SOP chunks loaded in compliance storage.")
+        
         gap_analysis = agent.analyze_compliance_gap(ob, relevant_chunks)
+        log_trace("SopDiffAgent", f"Gap Analysis finished. Has gap: {gap_analysis.get('has_gap', True)}. Severity: {gap_analysis.get('severity', 'Medium')}.")
         
         # If there is a gap/missing section, we create a compliance task and draft the SOP revision
         if gap_analysis.get('has_gap', True):
             # Calculate deadline date
             circ_date_val = datetime.strptime(circular['date'], "%Y-%m-%d")
-            deadline_days = ob.get('deadline_days') or 30 # Default 30 days
+            deadline_days = ob.get('deadline_days') or 30
             deadline_date_val = circ_date_val + timedelta(days=int(deadline_days))
             deadline_date_str = deadline_date_val.strftime("%Y-%m-%d")
             
             task_title = f"Address SEBI Gap: {ob['section_reference'] or 'Circular Section'}"
             task_desc = f"{ob['obligation_text']}\n\n**Gap Detail:** {gap_analysis.get('gap_description')}"
             dept = gap_analysis.get('affected_department', 'Compliance')
+            
+            log_trace("TaskPlannerAgent", f"Gap detected! Creating compliance task: '{task_title}' assigned to {dept} department. Deadline: {deadline_date_str}.")
             
             task_id = db.create_task(
                 company_id,
@@ -215,13 +279,10 @@ def process_circular_for_company(company_id: int, circular_id: int):
                 deadline_date_str
             )
             
-            # Store gap analysis and draft updates inside audit trail & tasks (using a serialized schema or temporary files, here we write to SQLite task validation field or log)
-            # To make it accessible, we store the full gap analysis details inside validation_feedback initially as JSON
-            # This is a very neat hack for storing structured drafts per task
             current_sop_clause = gap_analysis.get('current_sop_clauses', 'None found')
+            log_trace("SopDraftingAgent", f"Proposing legal redline revision of SOP section based on regulatory changes...")
             draft_details = agent.draft_sop_redline(ob, gap_analysis, current_sop_clause)
             
-            # Save the draft in validation_feedback for task edit retrieval
             full_task_meta = {
                 "gap_analysis": gap_analysis,
                 "draft": draft_details
@@ -230,9 +291,19 @@ def process_circular_for_company(company_id: int, circular_id: int):
             tasks_created += 1
             
             db.add_audit_log(company_id, "task_created", f"Created compliance task for {circular['circular_number']}: {task_title}", "System Agent")
+        else:
+            log_trace("SopDiffAgent", f"SOP already compliant with Obligation {ob['section_reference']}. No action required.")
             
+    # Risk calculation trace
+    tasks = db.get_tasks_by_company(company_id)
+    log_trace("RiskPredictionAgent", "Recalculating compliance risk rating after tasks modification...")
+    risk = agent.predict_compliance_risk(tasks)
+    log_trace("RiskPredictionAgent", f"Risk update completed. New organization risk: {risk['risk_level']} (Score: {risk['risk_score']}%).")
+    
     db.add_audit_log(company_id, "parse_circular", f"Processed circular {circular['circular_number']}. Created {tasks_created} task(s).", "System Agent")
-    return {"status": "processed", "tasks_created": tasks_created}
+    log_trace("MonitoringAgent", f"Compliance workflow completed. Total tasks generated: {tasks_created}.")
+    
+    return {"status": "processed", "tasks_created": tasks_created, "trace": trace}
 
 @app.get("/api/companies/{company_id}/tasks")
 def get_tasks(company_id: int):
@@ -381,3 +452,90 @@ def generate_audit_report(company_id: int):
 def trigger_seed():
     mock_data.seed_database()
     return {"message": "Database seed completed"}
+
+# --- New Modules Endpoints ---
+
+@app.post("/api/monitoring/sync")
+def sync_sebi_circulars():
+    """Triggers the SEBI Scraper Agent to index new circulars."""
+    try:
+        new_circs = agent.scrape_sebi_circulars()
+        added_count = 0
+        for c in new_circs:
+            conn = db.get_db_connection()
+            exist = conn.execute("SELECT id FROM circulars WHERE circular_number = ?", (c['circular_number'],)).fetchone()
+            conn.close()
+            
+            if not exist:
+                circ_id = db.add_circular(
+                    c['circular_number'],
+                    c['title'],
+                    c['date'],
+                    c['content_text'],
+                    c['pdf_url']
+                )
+                
+                # Extract obligations via Agent
+                obligations = agent.extract_obligations(c['content_text'])
+                for ob in obligations:
+                    db.add_obligation(
+                        circ_id,
+                        ob.get("obligation_text"),
+                        ob.get("section_reference"),
+                        ob.get("entity_type"),
+                        ob.get("frequency"),
+                        ob.get("deadline_days"),
+                        ob.get("evidence_required")
+                    )
+                added_count += 1
+        return {"status": "success", "synced": len(new_circs), "new_added": added_count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to sync circulars from SEBI: {str(e)}")
+
+class CircularDiffRequest(BaseModel):
+    old_circular_id: int
+    new_circular_id: int
+
+@app.post("/api/circulars/diff")
+def diff_circulars(request: CircularDiffRequest):
+    """Compares two circulars using the Circular Diff Agent."""
+    old_circ = db.get_circular(request.old_circular_id)
+    new_circ = db.get_circular(request.new_circular_id)
+    if not old_circ or not new_circ:
+        raise HTTPException(status_code=404, detail="Circular not found")
+        
+    diff_report = agent.diff_circulars_llm(old_circ['content_text'], new_circ['content_text'])
+    return {
+        "old_circular": old_circ,
+        "new_circular": new_circ,
+        "diff": diff_report
+    }
+
+@app.get("/api/companies/{company_id}/graph")
+def get_company_compliance_graph(company_id: int):
+    """Generates graph nodes and edges linking policies, obligations, and tasks."""
+    company = db.get_company(company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return db.get_compliance_graph(company_id)
+
+@app.get("/api/companies/{company_id}/documents-intelligence")
+def get_documents_intelligence(company_id: int):
+    """Returns the company's uploaded documents (SOPs), chunks, and all circulars with obligations."""
+    docs = db.get_documents_by_company(company_id)
+    chunks = db.get_document_chunks_by_company(company_id)
+    
+    conn = db.get_db_connection()
+    circular_rows = conn.execute("SELECT * FROM circulars ORDER BY date DESC").fetchall()
+    obligation_rows = conn.execute("SELECT o.*, c.circular_number FROM obligations o JOIN circulars c ON o.circular_id = c.id").fetchall()
+    conn.close()
+    
+    circulars = [dict(c) for c in circular_rows]
+    obligations = [dict(o) for o in obligation_rows]
+    
+    return {
+        "documents": docs,
+        "document_chunks": chunks,
+        "circulars": circulars,
+        "obligations": obligations
+    }

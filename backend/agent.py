@@ -1,7 +1,7 @@
 import os
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import google.generativeai as genai
 from dotenv import load_dotenv
 
@@ -149,7 +149,13 @@ def analyze_compliance_gap(obligation: dict, company_sop_chunks: list[dict]) -> 
     system_instruction = (
         "You are a Compliance Gap Analyzer. Your task is to compare a new regulatory obligation against a company's "
         "existing Standard Operating Procedure (SOP) text and determine if the SOP is already compliant, "
-        "needs minor modifications, or is completely missing the required procedures. Return a JSON object."
+        "needs minor modifications, or is completely missing the required procedures. Return a JSON object. "
+        "CRITICAL RULE FOR MAPPING: You must verify if the retrieved SOP text addresses the identical operational "
+        "instruction/objective or merely a related high-level topic. If the retrieved text deals with a different scope "
+        "(e.g., internal legal custody vs. public website disclosure), you must classify the status as 'missing' rather than "
+        "'gap'. Related but distinct regulations must never be mapped as gaps that override original procedures. "
+        "Also, inside 'current_sop_clauses', extract ONLY the specific sentence or sub-clause that corresponds to this rule, "
+        "never cite the entire parent section if it contains other unrelated sub-clauses."
     )
     
     prompt = f"""
@@ -172,7 +178,7 @@ def analyze_compliance_gap(obligation: dict, company_sop_chunks: list[dict]) -> 
       "has_gap": true/false (true if status is 'gap' or 'missing'),
       "gap_description": "Detailed explanation of what is missing/different in the company's SOP compared to the regulation",
       "severity": "High" / "Medium" / "Low" (High for missing core duties, Medium for frequency adjustments/process updates, Low for minor wording),
-      "current_sop_clauses": "Snippet of relevant text from the SOP, or 'None found'",
+      "current_sop_clauses": "Snippet of ONLY the specific relevant text/sentence from the SOP matching the rule, or 'None found' if no clause addresses this specific action. DO NOT copy the entire section if it covers other unrelated procedures.",
       "affected_department": "Suggest which department should handle this task (e.g., Compliance, Operations, IT, Finance, Legal)"
     }}
     """
@@ -193,7 +199,17 @@ def draft_sop_redline(obligation: dict, gap_analysis: dict, current_sop_text: st
     system_instruction = (
         "You are an expert Legal and Compliance SOP writer. Your job is to draft exact redlined wording "
         "for a company's Standard Operating Procedure (SOP) to incorporate a new SEBI regulatory requirement. "
-        "Make sure the changes are professional, clear, and refer directly to the regulation."
+        "Make sure the changes are professional, clear, and refer directly to the regulation. "
+        "CRITICAL RULES: \n"
+        "1. GRANULAR TARGETED REDLINES: If the current SOP paragraph/section contains multiple clauses or rules "
+        "covering other business procedures, you must target ONLY the specific sub-rule or sentence that is being modified. "
+        "You must NEVER suggest replacing or deleting the entire parent section if it contains other unrelated instructions. \n"
+        "2. PRESERVE ORIGINAL CLAUSES: If the obligation is a related but distinct rule (e.g. website disclosure vs. internal custody), "
+        "do not override the existing original text. Set 'current_text' to 'N/A' and draft the proposed text as a new addition (e.g., Clause 12.A or new paragraph), "
+        "leaving the original text intact.\n"
+        "3. AVOID DEADLINE FABRICATIONS: You must check the input obligation text for any specific deadline timelines (e.g., 'within 30 days'). "
+        "Never borrow, assume, or hallucinate deadlines (like LODR's 60 days) if they are not explicitly present in the new SEBI obligation text. "
+        "Cite the official SEBI circular number and date directly in your drafted clause."
     )
     
     prompt = f"""
@@ -209,10 +225,10 @@ def draft_sop_redline(obligation: dict, gap_analysis: dict, current_sop_text: st
     "{current_sop_text if current_sop_text != 'None found' else 'No existing section covers this topic.'}"
     
     Draft the updated SOP text. Provide:
-    1. 'current_text': The original text that needs to be replaced (or 'N/A' if it's a completely new section).
-    2. 'proposed_text': The new updated paragraph incorporating the SEBI rule.
-    3. 'redline_diff': A markdown formatted diff showing changes (using + for additions and - for deletions, or clear highlighting).
-    4. 'reason': The rationale for the wording change referencing the SEBI circular.
+    1. 'current_text': The exact specific sentence or sub-rule to be replaced (set to 'N/A' if this is a new addition or if the existing text represents an original, distinct rule that should be preserved).
+    2. 'proposed_text': The new updated paragraph or sub-clause incorporating the SEBI rule.
+    3. 'redline_diff': A markdown formatted diff showing changes (using + for additions and - for deletions, or clear highlighting of the sub-rule only).
+    4. 'reason': The rationale for the wording change referencing the specific SEBI circular and date.
 
     Return ONLY a valid JSON object matching this schema:
     {{
@@ -482,4 +498,181 @@ def get_mock_draft_sop(obligation: dict, gap: dict, current_text: str) -> dict:
             "proposed_text": f"New Section: The company shall implement procedures to {ob_text}. All records must be saved in the compliance repository.",
             "redline_diff": f"**+ New Section: The company shall implement procedures to {ob_text}. All records must be saved in the compliance repository.**",
             "reason": f"Created new section to comply with the latest SEBI requirements."
+        }
+
+# --- 7. Monitoring & Scraper agent ---
+def format_sebi_date(date_str: str) -> str:
+    """Standardizes SEBI dates (like 'Jul 05, 2026' or '05-Jul-2026') to 'YYYY-MM-DD'."""
+    try:
+        for fmt in ('%b %d, %Y', '%d-%b-%Y', '%Y-%m-%d', '%d/%m/%Y'):
+            try:
+                return datetime.strptime(date_str.strip(), fmt).strftime('%Y-%m-%d')
+            except ValueError:
+                continue
+    except:
+        pass
+    return datetime.now().strftime('%Y-%m-%d')
+
+def scrape_sebi_circulars() -> list[dict]:
+    """
+    Attempts to scrape the SEBI circular list.
+    Falls back to generating simulated recent circulars on failure or network blocks.
+    """
+    url = "https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doListing=yes&sid=1&ssid=7&smid=0"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
+    circulars_found = []
+    
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        
+        response = requests.get(url, headers=headers, timeout=8)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            table = soup.find('table') or soup.find('div', class_='list-box')
+            if table:
+                rows = table.find_all('tr')
+                for row in rows[1:]: # Skip header
+                    cols = row.find_all('td')
+                    if len(cols) >= 2:
+                        date_str = cols[0].text.strip()
+                        link_el = cols[1].find('a')
+                        if link_el:
+                            title = link_el.text.strip()
+                            href = link_el.get('href', '')
+                            # Parse circular number or create a distinct code
+                            circ_num = "SEBI/HO/GEN/" + date_str.replace("-", "/") + f"/{hash(title) % 1000}"
+                            
+                            circulars_found.append({
+                                "circular_number": circ_num,
+                                "title": title,
+                                "date": format_sebi_date(date_str),
+                                "content_text": f"Scraped SEBI regulation circular details for reference. Title: {title}. Source URL: {href}",
+                                "pdf_url": href
+                            })
+            print(f"Scraped {len(circulars_found)} circulars from SEBI site.")
+    except Exception as e:
+        print(f"Scraper encountered network/parsing issue: {e}. Falling back to simulator mode.")
+        
+    if not circulars_found:
+        # Fallback to simulated new circulars (guarantees the demo works offline or under block)
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        five_days_ago_str = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
+        
+        circulars_found = [
+            {
+                "circular_number": f"SEBI/HO/IMD/DF2/CIR/P/{datetime.now().strftime('%Y')}/105",
+                "title": "Stewardship and Disclosure Standards for Mutual Fund Trust Boards",
+                "date": five_days_ago_str,
+                "content_text": (
+                    "Securities and Exchange Board of India (SEBI)\n"
+                    "Circular No: SEBI/HO/IMD/DF2/CIR/P/2026/105\n"
+                    "Date: " + five_days_ago_str + "\n\n"
+                    "To: All Asset Management Companies (AMCs) / Mutual Funds\n\n"
+                    "Subject: Enhanced Stewardship and Website Disclosure Standards\n\n"
+                    "1. Stewardship Disclosures:\n"
+                    "Asset Management Companies (AMCs) must publish stewardship code disclosure and details of voting activities "
+                    "on their official websites annually. This disclosure must be published within 60 days of the end of the financial year.\n\n"
+                    "2. Governance Audits:\n"
+                    "AMCs shall appoint an independent external compliance auditor to conduct a governance audit of voting activities "
+                    "by September 30 of each year. The audit report must be uploaded to the SEBI portal.\n\n"
+                    "3. Effective Date:\n"
+                    "These directives shall be operational from the current financial year."
+                ),
+                "pdf_url": "https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doListing=yes&sid=1&ssid=7&smid=0"
+            },
+            {
+                "circular_number": f"SEBI/HO/MIRSD/MIRSD-PoD-1/P/CIR/{datetime.now().strftime('%Y')}/89",
+                "title": "Margin Reporting and Client Collateral Upgrades for Stockbrokers",
+                "date": today_str,
+                "content_text": (
+                    "Securities and Exchange Board of India (SEBI)\n"
+                    "Circular No: SEBI/HO/MIRSD/MIRSD-PoD-1/P/CIR/2026/89\n"
+                    "Date: " + today_str + "\n\n"
+                    "To: All Registered Stockbrokers\n\n"
+                    "Subject: Client Collateral daily reporting timelines and upload standardization\n\n"
+                    "1. Daily Reporting Requirement:\n"
+                    "All registered stockbrokers must perform daily reporting and uploading of client collateral details. "
+                    "The collateral reports must be uploaded to the clearing corporation systems every day before 11:59 PM (IST).\n\n"
+                    "2. Penal Action:\n"
+                    "Delay in uploading collateral records will attract a penalty of INR 1,00,000 per day.\n\n"
+                    "3. Effective Date:\n"
+                    "This circular will be effective immediately."
+                ),
+                "pdf_url": "https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doListing=yes&sid=1&ssid=7&smid=0"
+            }
+        ]
+        
+    return circulars_found
+
+def diff_circulars_llm(old_text: str, new_text: str) -> dict:
+    """
+    Diffs two circular texts to identify obligations that were added, modified, or removed.
+    """
+    system_instruction = (
+        "You are an expert SEBI Regulatory Diff Agent. Your job is to compare a previous regulation text (Old Circular) "
+        "with an updated version (New Circular) and extract what has changed. Be precise. Focus on modified thresholds, "
+        "frequencies, or new obligations."
+    )
+    
+    prompt = f"""
+    Compare these two SEBI Circular texts and list all additions, modifications, and removals of compliance obligations.
+    
+    [OLD CIRCULAR TEXT]
+    {old_text}
+    
+    [NEW CIRCULAR TEXT]
+    {new_text}
+    
+    Return a JSON object containing lists of changes:
+    {{
+      "additions": [
+        {{
+          "text": "Description of the new obligation",
+          "details": "Details including section/clause reference, etc."
+        }}
+      ],
+      "modifications": [
+        {{
+          "text": "Description of what was changed (e.g. from weekly to daily reporting)",
+          "details": "Old value vs new value, section reference, etc."
+        }}
+      ],
+      "removals": [
+        {{
+          "text": "Description of the removed obligation",
+          "details": "Old reference"
+        }}
+      ]
+    }}
+    """
+    
+    try:
+        response_text = call_gemini(prompt, system_instruction, response_json=True)
+        return json.loads(response_text)
+    except Exception as e:
+        print(f"Failed to diff circulars via Gemini, using fallback: {e}")
+        # Standard mock comparative diff
+        return {
+            "additions": [
+                {
+                    "text": "Added requirement for a dedicated Risk Management Committee to report quarterly.",
+                    "details": "Applicable to AMCs/Mutual Funds (Section 1)."
+                }
+            ],
+            "modifications": [
+                {
+                    "text": "Reporting frequency changed from weekly (Friday) to daily (before 11:59 PM).",
+                    "details": "Replaces the previous weekly submission schedule for client collateral reports (Section 2)."
+                }
+            ],
+            "removals": [
+                {
+                    "text": "Removed weekly collateral submission option.",
+                    "details": "Old Clause 8.2 is no longer valid."
+                }
+            ]
         }

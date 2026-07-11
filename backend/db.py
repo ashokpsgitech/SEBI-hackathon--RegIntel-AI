@@ -310,6 +310,106 @@ def add_audit_log(company_id, action_type, description, user="System Agent"):
     conn.commit()
     conn.close()
 
+def get_compliance_graph(company_id):
+    conn = get_db_connection()
+    # Fetch company
+    company_row = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
+    if not company_row:
+        conn.close()
+        return {"nodes": [], "edges": []}
+    
+    co = dict(company_row)
+    depts = json.loads(co['departments'])
+    
+    nodes = []
+    edges = []
+    
+    # 1. Company node
+    nodes.append({"id": f"co_{company_id}", "label": co['name'], "type": "company"})
+    
+    # Add department nodes & connect company -> departments
+    for dept in depts:
+        nodes.append({"id": f"dept_{dept}", "label": f"{dept} Dept", "type": "department"})
+        edges.append({"source": f"co_{company_id}", "target": f"dept_{dept}", "label": "has_dept"})
+        
+    # 2. Fetch tasks for this company
+    tasks_rows = conn.execute("""
+        SELECT t.*, o.obligation_text, o.section_reference, o.evidence_required, c.id as circular_id, c.circular_number, c.title as circular_title 
+        FROM tasks t
+        LEFT JOIN obligations o ON t.obligation_id = o.id
+        LEFT JOIN circulars c ON o.circular_id = c.id
+        WHERE t.company_id = ?
+    """, (company_id,)).fetchall()
+    
+    processed_circular_ids = set()
+    processed_obligation_ids = set()
+    
+    for row in tasks_rows:
+        t = dict(row)
+        # Task node
+        nodes.append({
+            "id": f"task_{t['id']}", 
+            "label": f"Task #{t['id']}: {t['title'][:30]}...", 
+            "type": "task",
+            "status": t['status'],
+            "dept": t['department_owner']
+        })
+        # Connect Task -> Department
+        edges.append({"source": f"task_{t['id']}", "target": f"dept_{t['department_owner']}", "label": "assigned_to"})
+        
+        # Obligation node
+        if t['obligation_id'] and t['obligation_id'] not in processed_obligation_ids:
+            processed_obligation_ids.add(t['obligation_id'])
+            nodes.append({
+                "id": f"ob_{t['obligation_id']}", 
+                "label": f"Ob: {t['obligation_text'][:40]}...", 
+                "type": "obligation",
+                "reference": t['section_reference']
+            })
+            # Connect Obligation -> Task
+            edges.append({"source": f"ob_{t['obligation_id']}", "target": f"task_{t['id']}", "label": "triggers"})
+        elif t['obligation_id']:
+            edges.append({"source": f"ob_{t['obligation_id']}", "target": f"task_{t['id']}", "label": "triggers"})
+            
+        # Circular node
+        if t['circular_id'] and t['circular_id'] not in processed_circular_ids:
+            processed_circular_ids.add(t['circular_id'])
+            nodes.append({
+                "id": f"circ_{t['circular_id']}", 
+                "label": t['circular_number'], 
+                "type": "circular",
+                "title": t['circular_title']
+            })
+            
+        # Connect Circular -> Obligation
+        if t['circular_id'] and t['obligation_id']:
+            edges.append({"source": f"circ_{t['circular_id']}", "target": f"ob_{t['obligation_id']}", "label": "contains"})
+
+    # Fetch SOP chunks and connect to obligations/tasks
+    for row in tasks_rows:
+        t = dict(row)
+        if t['validation_feedback'] and t['validation_status'] in ('Pending_SOP_Review', 'SOP_Approved', 'Approved'):
+            try:
+                meta = json.loads(t['validation_feedback'])
+                gap = meta.get('gap_analysis', {})
+                sop_clause_snip = gap.get('current_sop_clauses')
+                if sop_clause_snip and sop_clause_snip != 'None found':
+                    sop_node_id = f"sop_sec_{t['id']}"
+                    nodes.append({
+                        "id": sop_node_id,
+                        "label": f"SOP Clause: {gap.get('affected_department', 'Policy')}",
+                        "type": "sop_chunk",
+                        "snippet": sop_clause_snip[:120] + "..."
+                    })
+                    if t['obligation_id']:
+                        edges.append({"source": f"ob_{t['obligation_id']}", "target": sop_node_id, "label": "diffed_against"})
+                    edges.append({"source": f"task_{t['id']}", "target": sop_node_id, "label": "modifies"})
+            except:
+                pass
+                
+    conn.close()
+    return {"nodes": nodes, "edges": edges}
+
 def get_audit_logs(company_id):
     conn = get_db_connection()
     rows = conn.execute("SELECT * FROM audit_logs WHERE company_id = ? ORDER BY timestamp DESC", (company_id,)).fetchall()

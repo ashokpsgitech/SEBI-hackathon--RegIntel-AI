@@ -10,6 +10,28 @@ def extract_text_from_pdf(pdf_path: str) -> str:
             page_text = page.extract_text()
             if page_text:
                 text += page_text + "\n"
+        
+        # OCR Fallback for scanned PDFs
+        if not text.strip():
+            print("Detected potential scanned PDF (no text extracted). Attempting OCR fallback...")
+            try:
+                import pdf2image
+                import pytesseract
+                # Convert PDF to images
+                images = pdf2image.convert_from_path(pdf_path)
+                ocr_text = ""
+                for img in images:
+                    page_text = pytesseract.image_to_string(img)
+                    if page_text:
+                        ocr_text += page_text + "\n"
+                if ocr_text.strip():
+                    print("OCR text extraction successful.")
+                    return ocr_text
+            except ImportError:
+                print("OCR Fallback warning: 'pdf2image' or 'pytesseract' not installed. Return default simulation text if needed.")
+            except Exception as ocr_err:
+                print(f"OCR Fallback execution failed: {ocr_err}")
+                
         return text
     except Exception as e:
         print(f"Error parsing PDF {pdf_path}: {e}")
