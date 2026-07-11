@@ -116,6 +116,7 @@ Follow these steps to run the frontend and backend on your local machine:
      ```env
      GEMINI_API_KEY=your_actual_api_key_here
      ```
+   * *Note on Mock Agent Mode:* If you do not have a Gemini API key, the system will **automatically run in Mock Agent Mode**. It will successfully seed the SQLite database and perform mock similarity checks, OCR parsing, and policy redlining out-of-the-box so you can fully test the frontend interface without any setup dependencies.
 
 6. **Start the FastAPI Server**:
    Run the command from the **root directory** of the project:
